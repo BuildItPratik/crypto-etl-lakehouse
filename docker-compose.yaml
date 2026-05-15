@@ -19,6 +19,7 @@ services:
       - "7077:7077"
       - "8080:8080"
       - "8888:8888"
+      - "8000:8000"
     volumes:
       - ./jobs:/opt/spark/jobs
       - ./notebooks:/opt/spark/notebooks
@@ -193,8 +194,13 @@ services:
     environment:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
     volumes:
       - grafana_data:/var/lib/grafana
+      # dashboard provisioning config
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      # actual dashboard json files
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
     restart: unless-stopped
 
 

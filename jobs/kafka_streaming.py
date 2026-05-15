@@ -1,6 +1,9 @@
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import from_json, col, to_timestamp, to_date
 from pyspark.sql.types import StructType, StructField, StringType, DoubleType
+from prometheus_client import start_http_server, Gauge
+import time
+import json
 
 # -----------------------------
 # Schema
@@ -19,6 +22,34 @@ coin_schema = StructType([
     StructField("low_24h", DoubleType(), True),
     StructField("last_updated", StringType(), True),
 ])
+
+# -----------------------------
+# Prometheus Metrics
+# -----------------------------
+
+spark_kafka_lag = Gauge(
+    'spark_kafka_lag',
+    'Kafka lag for Spark streaming consumer',
+    ['topic', 'partition']
+)
+
+spark_input_rate = Gauge(
+    'spark_input_rows_per_second',
+    'Spark input rows per second'
+)
+
+spark_processed_rate = Gauge(
+    'spark_processed_rows_per_second',
+    'Spark processed rows per second'
+)
+
+spark_batch_duration = Gauge(
+    'spark_batch_duration_ms',
+    'Spark microbatch execution duration'
+)
+
+# Start Prometheus metrics server
+start_http_server(8000)
 
 spark = SparkSession.builder \
     .appName("KafkaCryptoConsumer") \
@@ -89,7 +120,8 @@ flattened_df = parsed_df.select(
 # OPTIONAL: basic dedup (lightweight)
 # -----------------------------
 # prevents exact duplicates within micro-batch
-flattened_df = flattened_df.dropDuplicates(["event_id"])
+flattened_df = flattened_df.withWatermark("event_time", "10 minutes") \
+.dropDuplicates(["event_id"])
 
 # -----------------------------
 # Write stream (partitioned!)
@@ -110,6 +142,45 @@ query = flattened_df.writeStream \
 #     .option("path", "/tmp/crypto-data/raw") \
 #     .option("checkpointLocation", "/tmp/checkpoints/kafka_to_local") \
 #     .start()
+
+while query.isActive:
+
+    progress = query.lastProgress
+
+    if progress:
+
+        source = progress["sources"][0]
+
+        latest_offsets = source.get("latestOffset", {}).get("crypto-prices", {})
+        end_offsets = source.get("endOffset", {}).get("crypto-prices", {})
+
+        for partition in latest_offsets:
+
+            latest = int(latest_offsets[partition])
+            processed = int(end_offsets[partition])
+
+            lag = latest - processed
+
+            spark_kafka_lag.labels(
+                topic="crypto-prices",
+                partition=str(partition)
+            ).set(lag)
+
+        spark_input_rate.set(
+            float(progress.get("inputRowsPerSecond", 0))
+        )
+
+        spark_processed_rate.set(
+            float(progress.get("processedRowsPerSecond", 0))
+        )
+
+        spark_batch_duration.set(
+            float(progress["durationMs"].get("triggerExecution", 0))
+        )
+
+        print("Metrics updated")
+
+    time.sleep(5)
 
 print(query.status)
 print(query.isActive)
