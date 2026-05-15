@@ -1,0 +1,8 @@
+FROM python:3.10
+
+RUN pip install kafka-python requests
+
+WORKDIR /app
+COPY jobs/producer.py .
+
+CMD ["python", "producer.py"]
