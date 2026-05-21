@@ -151,16 +151,25 @@ services:
       - minio_data:/data
     restart: unless-stopped
 
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   minio-init:
     image: minio/mc
+    container_name: minio-init
+
     depends_on:
-      - minio
+      minio:
+        condition: service_healthy
+
     entrypoint: >
       /bin/sh -c "
-      sleep 5;
       mc alias set myminio http://minio:9000 admin password;
-      mc mb myminio/crypto-data || true;
-      mc policy set public myminio/crypto-data;
+      mc mb myminio/crypto-data --ignore-existing;
+      mc anonymous set public myminio/crypto-data;
       exit 0;
       "
     restart: "no"
@@ -196,10 +205,14 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
     volumes:
+      # persistent grafana data
       - grafana_data:/var/lib/grafana
-      # dashboard provisioning config
-      - ./grafana/provisioning:/etc/grafana/provisioning
-      # actual dashboard json files
+
+      # provisioning configs
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+
+      # dashboard json files
       - ./grafana/dashboards:/var/lib/grafana/dashboards
     restart: unless-stopped
 

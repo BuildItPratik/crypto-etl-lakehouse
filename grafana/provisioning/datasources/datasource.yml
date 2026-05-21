@@ -1,8 +1,22 @@
 apiVersion: 1
 
 datasources:
+  - name: PostgreSQL
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: crypto
+    user: admin
+    secureJsonData:
+      password: admin
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1500
+      timescaledb: false
+      database: crypto      
+    isDefault: true
+
   - name: Prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090
-    isDefault: true
