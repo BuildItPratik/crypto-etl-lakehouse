@@ -1,9 +1,10 @@
-version: '3'
+name: crypto-etl-lakehouse
 
 volumes:
   minio_data:
   pg_data:
   grafana_data:
+  airflow_data:
 
 services:
   spark-master:
@@ -12,18 +13,25 @@ services:
       dockerfile: Dockerfile.spark
     container_name: spark-master
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+    environment:
+      TZ: UTC
     command: >
       /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     ports:
       - "7077:7077"
       - "8080:8080"
       - "8888:8888"
-      - "8000:8000"
     volumes:
       - ./jobs:/opt/spark/jobs
       - ./notebooks:/opt/spark/notebooks
       - ./spark-events:/tmp/spark-events
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080 >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
     restart: unless-stopped
 
   spark-worker:
@@ -41,6 +49,40 @@ services:
     environment:
       SPARK_WORKER_MEMORY: 2g
       SPARK_WORKER_CORES: 2
+      TZ: UTC
+    restart: unless-stopped
+
+  # Structured Streaming job: Kafka -> Parquet on MinIO.
+  # Driver runs here; it resumes from the MinIO checkpoint on restart.
+  spark-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
+    container_name: spark-consumer
+    depends_on:
+      spark-master:
+        condition: service_healthy
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    command: >
+      /opt/spark/bin/spark-submit
+      --master spark://spark-master:7077
+      --executor-memory 1G
+      --total-executor-cores 1
+      /opt/spark/jobs/kafka_streaming.py
+    volumes:
+      - ./jobs:/opt/spark/jobs
+      - ./spark-events:/tmp/spark-events
+    ports:
+      - "8000:8000"   # Prometheus metrics endpoint (driver)
+    environment:
+      TZ: UTC
     restart: unless-stopped
         
 
@@ -55,6 +97,7 @@ services:
       - ./dags:/opt/airflow/dags
       - ./jobs:/opt/airflow/jobs
       - /var/run/docker.sock:/var/run/docker.sock   # IMPORTANT
+      - airflow_data:/opt/airflow
     ports:
       - "8081:8080"
     command: standalone
@@ -62,6 +105,7 @@ services:
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__WEBSERVER__DEFAULT_USER_USERNAME=admin
       - AIRFLOW__WEBSERVER__DEFAULT_USER_PASSWORD=admin
+      - TZ=UTC
     restart: unless-stopped
 
   kafka-1:
@@ -69,6 +113,11 @@ services:
     container_name: kafka-1
     ports:
       - "9092:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -86,6 +135,11 @@ services:
     container_name: kafka-2
     ports:
       - "9094:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
     environment:
       KAFKA_NODE_ID: 2
       KAFKA_PROCESS_ROLES: broker,controller
@@ -103,6 +157,11 @@ services:
     container_name: kafka-3
     ports:
       - "9095:9092"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:9092 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
     environment:
       KAFKA_NODE_ID: 3
       KAFKA_PROCESS_ROLES: broker,controller
@@ -132,10 +191,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.producer
+    container_name: producer
     depends_on:
-      - kafka-1
-      - kafka-2
-      - kafka-3
+      kafka-1:
+        condition: service_healthy
+      kafka-2:
+        condition: service_healthy
+      kafka-3:
+        condition: service_healthy
+    environment:
+      TZ: UTC
+    restart: unless-stopped
 
   minio:
     image: minio/minio:latest
@@ -180,6 +246,8 @@ services:
       POSTGRES_USER: admin
       POSTGRES_PASSWORD: admin
       POSTGRES_DB: crypto
+      TZ: UTC
+      PGTZ: UTC
     ports:
       - "5432:5432"
     volumes:

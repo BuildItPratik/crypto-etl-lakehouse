@@ -21,4 +21,4 @@ scrape_configs:
 
   - job_name: 'spark-streaming'
     static_configs:
-      - targets: ['spark-master:8000']
+      - targets: ['spark-consumer:8000']
