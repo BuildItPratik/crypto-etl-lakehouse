@@ -22,13 +22,59 @@ CoinGecko API ──▶ Producer ──▶ Kafka (3 brokers, KRaft) ──▶ Sp
 
 See [`knowledge.md`](knowledge.md) for the full deep-dive: every component, the port map, design decisions, and known trade-offs.
 
-## Quick start
+## Run the project, step by step
 
-Requirements: **Docker with Compose v2**, `make`, and ~6 GB of RAM free for the stack.
+**0. Prerequisites.** Docker Desktop (or Docker Engine + Compose v2) running, ~6 GB RAM free, ~10 GB disk for images. First build downloads Spark and its connector jars — expect **10–15 minutes**; subsequent starts take under a minute.
+
+**1. Clone and start.**
+
+```bash
+git clone https://github.com/BuildItPratik/crypto-etl-lakehouse.git
+cd crypto-etl-lakehouse
+make up          # or: docker compose up -d --build
+```
 
 > **Windows:** work from [Git Bash](https://git-scm.com/downloads) (or WSL). If Git Bash doesn't have `make` (it often doesn't), install it once via `choco install make`, `winget install GnuWin32.Make`, or `apt install make` inside WSL. Don't want to install it? Skip the Makefile entirely — every target is a plain `docker compose ...` command, listed in the table below.
 
-Everything works identically on Linux, macOS, and Windows.
+**2. Wait for the build and boot.** The stack comes up in healthcheck-gated order — no manual steps:
+
+1. **Postgres** boots and runs `init.sql` (serving-layer schema).
+2. **MinIO** boots; the `minio-init` one-shot creates the `crypto-data` bucket.
+3. **Spark** master + worker form the cluster.
+4. **Kafka** (3-broker KRaft) becomes healthy.
+5. **spark-consumer** starts the Structured Streaming job (Kafka → Parquet on MinIO); on any restart it resumes from its MinIO checkpoint.
+6. **producer** starts polling CoinGecko every 30 s for 20 coins.
+7. **Airflow** runs the `crypto_pipeline` DAG every 2 minutes: health-checks the producer and Kafka, then runs the analytics job that computes metrics and upserts into Postgres.
+
+**3. Verify it's working.**
+
+```bash
+make ps          # all services should be "running" (or "completed 0" for minio-init, exit 0)
+```
+
+Then, in order of usefulness:
+
+- `make producer-logs` — you should see `Pushed 20 records at ...` roughly every 30 s.
+- `make spark-logs` — the streaming query should report batches with no errors.
+- `make airflow-logs` — after the first 2-minute boundary, a `crypto_pipeline` DAG run should succeed.
+- **Grafana** at http://localhost:3000 (admin/admin) → *Analytics* dashboard — BTC price and ingestion-rate panels populate within ~5 minutes.
+- `make psql` — `SELECT COUNT(*) FROM crypto_events;` grows over time.
+
+**4. Explore.** The "What runs where" table below lists every UI (Kafka UI, Spark UI, MinIO console, Airflow, …) and `make jupyter` starts a Spark-capable notebook.
+
+**5. Stop / restart / reset.**
+
+- `make down` — stops everything; **all data survives** in Docker volumes, so `make up` resumes where you left off (streaming continues from its checkpoint).
+- `make restart` — restarts all services in place.
+- `make reset` — ⚠️ stops the stack **and deletes all data** (lake, database, dashboards state) for a from-scratch start.
+
+**If something looks wrong:**
+
+- A service stuck in `restarting` → `docker compose logs <service>`; most commonly the CoinGecko free API rate-limiting your IP (429s in producer logs) — it retries on the next poll, so data resumes on its own.
+- Grafana panels empty but `make ps` healthy → give it ~5 more minutes; the first DAG run only happens on a 2-minute cron boundary.
+- Want a guaranteed clean slate → `make reset && make up`.
+
+## Quick start (TL;DR)
 
 ```bash
 git clone https://github.com/BuildItPratik/crypto-etl-lakehouse.git
@@ -36,17 +82,7 @@ cd crypto-etl-lakehouse
 make up
 ```
 
-That's it. On first start everything comes up in healthcheck-gated dependency order:
-
-1. **Postgres** boots and runs `init.sql` (serving-layer schema).
-2. **MinIO** boots; the `minio-init` one-shot creates the `crypto-data` bucket.
-3. **Spark** master + worker form the cluster.
-4. **Kafka** (3-broker KRaft) becomes healthy.
-5. **spark-consumer** starts the Structured Streaming job (Kafka → Parquet on MinIO), resuming from its checkpoint on any restart.
-6. **producer** starts polling CoinGecko every 30 s for 20 coins.
-7. **Airflow** runs the `crypto_pipeline` DAG every 2 minutes: health-checks the producer and Kafka, then runs the analytics job that computes metrics and upserts into Postgres.
-
-Data appears in Grafana within ~5 minutes. No manual steps, no platform-specific scripts.
+Then verify with `make ps` and watch Grafana at http://localhost:3000 — data flows within ~5 minutes.
 
 ## Commands
 
