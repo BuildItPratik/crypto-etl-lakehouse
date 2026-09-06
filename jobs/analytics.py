@@ -3,7 +3,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import *
 from pyspark.sql.window import Window
 from pyspark.sql.types import DoubleType
-from datetime import datetime
+from datetime import datetime, timezone
 import psycopg2
 import traceback
 
@@ -32,7 +32,7 @@ db_properties = {
 }
 
 def log(msg):
-    print(f"[{datetime.utcnow()}] {msg}", flush=True)
+    print(f"[{datetime.now(timezone.utc).isoformat()}] {msg}", flush=True)
 
 def get_connection():
     return psycopg2.connect(
@@ -47,7 +47,7 @@ try:
     log("=== STARTING JOB ===")
 
     run_id = int(time.time())
-    processing_time_value = datetime.utcnow()
+    processing_time_value = datetime.now(timezone.utc)
 
     # -----------------------------
     # READ
