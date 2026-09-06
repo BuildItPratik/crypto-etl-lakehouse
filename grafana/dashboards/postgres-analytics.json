@@ -677,7 +677,7 @@
                         "editorMode": "code",
                         "format": "table",
                         "rawQuery": true,
-                        "rawSql": "SELECT\r\n  AVG(volatility)\r\nFROM crypto_metrics\r\nWHERE event_time > NOW() - INTERVAL '5 minutes'",
+                        "rawSql": "SELECT\r\n  date_trunc('minute', event_time) AS time,\r\n  AVG(volatility) AS avg_volatility\r\nFROM crypto_metrics\r\nGROUP BY 1\r\nORDER BY 1",
                         "sql": {
                           "columns": [
                             {
