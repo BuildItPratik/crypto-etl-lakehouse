@@ -22,7 +22,7 @@ with DAG(
     check_producer = BashOperator(
         task_id="check_producer",
         bash_command="""
-        if docker ps | grep -q test-producer; then
+        if docker ps | grep -q " producer$"; then
             echo "Producer is running"
         else
             echo "Producer is NOT running"
