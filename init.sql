@@ -83,6 +83,19 @@ CREATE TABLE IF NOT EXISTS crypto_metrics (
     PRIMARY KEY (id, event_time)
 );
 
+-- Column order must match metrics_df's select order in jobs/analytics.py
+CREATE TABLE IF NOT EXISTS crypto_metrics_staging (
+    id TEXT,
+    event_time TIMESTAMP,
+    price DOUBLE PRECISION,
+    price_1min_ago DOUBLE PRECISION,
+    price_5min_ago DOUBLE PRECISION,
+    change_1min DOUBLE PRECISION,
+    change_5min DOUBLE PRECISION,
+    sma DOUBLE PRECISION,
+    volatility DOUBLE PRECISION
+);
+
 CREATE INDEX IF NOT EXISTS idx_metrics_id_time
     ON crypto_metrics (id, event_time DESC);
 
